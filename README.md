@@ -14,9 +14,8 @@ For more information see: http://www.ulisp.com/
 
 
 Added to my fork:
-   	- Made version string a constant and put up top for easy mod
-   	- Added list support for subseq
-   	- Added is-available to check to see if a serial read will block
-	- Added gc-threshold to set your own GC threshold (for garbage collection).
-	  This gives you finer grain control (you can lower/disable garbage collection
-	  during critical "soft-realtime" parts of your code)
+* Made version string a constant and put up top for easy mod
+* Added list support for subseq
+* Added is-available to check to see if a serial read will block
+* Added gc-threshold to set your own GC threshold (for garbage collection). This gives you finer grain control (you can lower/disable garbage collection
+during critical "soft-realtime" parts of your code)
