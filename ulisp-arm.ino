@@ -2,7 +2,18 @@
    David Johnson-Davies - www.technoblogy.com - 1st July 2020
 
    Licensed under the MIT license: https://opensource.org/licenses/MIT
+
+   Additional modifications (by Todd Coram todd@maplefish.com under same license):
+   * 10/25/2020 tac
+   	- Made version string a constant and put up top for easy mod
+   	- Added list support for subseq
+   	- Added is-available to check to see if a serial read will block
+	- Added gc-threshold to set your own GC threshold (for garbage collection).
+	  This gives you finer grain control (you can lower/disable garbage collection
+	  during critical "soft-realtime" parts of your code)
 */
+
+static const char ulisp_version[] PROGMEM="uLisp 3.3-tac";
 
 // Lisp Library
 const char LispLibrary[] PROGMEM = "";
@@ -10,13 +21,13 @@ const char LispLibrary[] PROGMEM = "";
 // Compile options
 
 // #define resetautorun
-#define printfreespace
+// #define printfreespace
 // #define printgcs
 // #define sdcardsupport
 // #define gfxsupport
 // #define lisplibrary
 #define assemblerlist
-// #define lineeditor
+#define lineeditor
 // #define vt100
 
 // Includes
@@ -120,7 +131,9 @@ WRITEBYTE, WRITESTRING, WRITELINE, RESTARTI2C, GC, ROOM, SAVEIMAGE, LOADIMAGE, C
 DIGITALWRITE, ANALOGREAD, ANALOGWRITE, DELAY, MILLIS, SLEEP, NOTE, EDIT, PPRINT, PPRINTALL, FORMAT,
 REQUIRE, LISTLIBRARY, DRAWPIXEL, DRAWLINE, DRAWRECT, FILLRECT, DRAWCIRCLE, FILLCIRCLE, DRAWROUNDRECT,
 FILLROUNDRECT, DRAWTRIANGLE, FILLTRIANGLE, DRAWCHAR, SETCURSOR, SETTEXTCOLOR, SETTEXTSIZE, SETTEXTWRAP,
-FILLSCREEN, SETROTATION, INVERTDISPLAY, ENDFUNCTIONS };
+FILLSCREEN, SETROTATION, INVERTDISPLAY,
+ISAVAILABLE,  GC_THRESHOLD, 
+ENDFUNCTIONS };
 
 // Typedefs
 
@@ -347,6 +360,7 @@ void error2 (symbol_t fname, PGM_P string) {
 // Save space as these are used multiple times
 const char notanumber[] PROGMEM = "argument is not a number";
 const char notaninteger[] PROGMEM = "argument is not an integer";
+const char notastringorlist[] PROGMEM = "argument is not a string or list";
 const char notastring[] PROGMEM = "argument is not a string";
 const char notalist[] PROGMEM = "argument is not a list";
 const char notasymbol[] PROGMEM = "argument is not a symbol";
@@ -2968,7 +2982,7 @@ object *negate (object *arg) {
   return nil;
 }
 
-object *fn_subtract (object *args, object *env) {
+sobject *fn_subtract (object *args, object *env) {
   (void) env;
   object *arg = car(args);
   args = cdr(args);
@@ -3597,22 +3611,53 @@ object *fn_concatenate (object *args, object *env) {
 object *fn_subseq (object *args, object *env) {
   (void) env;
   object *arg = first(args);
-  if (!stringp(arg)) error(SUBSEQ, notastring, arg);
+  if (!stringp(arg) && !listp(arg)) error(SUBSEQ, notastringorlist, arg);
   int start = checkinteger(SUBSEQ, second(args));
   int end;
   args = cddr(args);
-  if (args != NULL) end = checkinteger(SUBSEQ, car(args)); else end = stringlength(arg);
-  object *result = myalloc();
-  result->type = STRING;
-  object *head = NULL;
-  int chars = 0;
-  for (int i=start; i<end; i++) {
-    char ch = nthchar(arg, i);
-    if (ch == 0) error2(SUBSEQ, PSTR("index out of range"));
-    buildstring(ch, &chars, &head);
+  if (stringp(arg)) {
+    if (args != NULL) end = checkinteger(SUBSEQ, car(args)); else end = stringlength(arg);
+    object *result = myalloc();
+    result->type = STRING;
+    object *head = NULL;
+    int chars = 0;
+    for (int i=start; i<end; i++) {
+      char ch = nthchar(arg, i);
+      if (ch == 0) error2(SUBSEQ, PSTR("index out of range"));
+      buildstring(ch, &chars, &head);
+    }
+    result->cdr = head;
+    return result;
+  } else {
+    if (args != NULL)
+      end = checkinteger(SUBSEQ, car(args));
+    else
+      end = listlength(LENGTH, arg);
+    if (start > end) error2(SUBSEQ, PSTR("start > end"));
+    object *list = arg;
+    int n = start;
+    while (list != NULL) {
+      if (improperp(list)) error(SUBSEQ, notproper, list);
+      if (n == 0) break;
+      list = cdr(list);
+      n--;
+    }
+    int cnt = end - start - 1; 	/* indexing starts at 0 */
+    if (cnt < 0) { return nil; }
+    --cnt;			/* end is not inclusive */
+    object *head = cons(car(list), nil);
+    object *tail = head;
+    list = cdr(list);
+    while (list != NULL) {
+      if (cnt < 0) break;
+      object *obj = cons(car(list), nil);
+      cdr(tail) = obj; tail = obj;
+      list = cdr(list);
+      cnt--;
+    }
+    return head;
   }
-  result->cdr = head;
-  return result;
+  
 }
 
 object *fn_readfromstring (object *args, object *env) {   
@@ -4329,6 +4374,36 @@ object *fn_invertdisplay (object *args, object *env) {
 
 // Insert your own function definitions here
 
+// Is data available to read?
+//
+object *fn_isavail (object *args, object *env) {
+  (void) env;
+  int address = 0;
+  int avail = false;
+  if (args != NULL) {
+    int stream = isstream(first(args));
+    address = stream & 0xFF;
+  } else {
+    return nil;
+  }
+  switch(address) {
+  case 1:
+    avail = Serial1.available(); break;
+  case 2:
+    avail = Serial2.available(); break;
+  case 3:
+    avail = Serial3.available(); break;
+  }   
+  return (avail ? tee : nil);
+}
+
+unsigned int gc_low_threshold = (WORKSPACESIZE>>4);
+object *fn_gc_threshold (object *args, object *env) {
+    (void) env;
+    gc_low_threshold = checkinteger(GC_THRESHOLD, car(args));
+    return nil;
+}
+
 // Built-in procedure names - stored in PROGMEM
 
 const char string0[] PROGMEM = "nil";
@@ -4540,6 +4615,8 @@ const char string205[] PROGMEM = "set-text-wrap";
 const char string206[] PROGMEM = "fill-screen";
 const char string207[] PROGMEM = "set-rotation";
 const char string208[] PROGMEM = "invert-display";
+const char string300[] PROGMEM = "is-available";
+const char string301[] PROGMEM = "gc-threshold";
 
 // Third parameter is no. of arguments; 1st hex digit is min, 2nd hex digit is max, 0xF is unlimited
 const tbl_entry_t lookup_table[] PROGMEM = {
@@ -4752,6 +4829,8 @@ const tbl_entry_t lookup_table[] PROGMEM = {
   { string206, fn_fillscreen, 0x01 },
   { string207, fn_setrotation, 0x11 },
   { string208, fn_invertdisplay, 0x11 },
+  { string300, fn_isavail, 0x11 },
+  { string301, fn_gc_threshold, 0x11 },
 };
 
 // Table lookup functions
@@ -4831,7 +4910,9 @@ object *eval (object *form, object *env) {
   // Enough space?
   // Serial.println((uint32_t)sp - (uint32_t)&ENDSTACK); // Find best STACKDIFF value
   if (((uint32_t)sp - (uint32_t)&ENDSTACK) < STACKDIFF) error2(0, PSTR("stack overflow"));
-  if (Freespace <= WORKSPACESIZE>>4) gc(form, env);
+  //  if (Freespace <= WORKSPACESIZE>>4) gc(form, env);
+  if (Freespace <= gc_low_threshold) gc(form, env);
+
   // Escape
   if (tstflag(ESCAPE)) { clrflag(ESCAPE); error2(0, PSTR("escape!"));}
   if (!tstflag(NOESC)) testescape();
@@ -5495,7 +5576,7 @@ void setup () {
   initenv();
   initsleep();
   initgfx();
-  pfstring(PSTR("uLisp 3.3 "), pserial); pln(pserial);
+  pfstring(ulisp_version, pserial); pln(pserial);
 }
 
 // Read/Evaluate/Print loop
