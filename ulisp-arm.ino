@@ -23,7 +23,7 @@ const char LispLibrary[] PROGMEM = "";
 // #define resetautorun
 // #define printfreespace
 // #define printgcs
-// #define sdcardsupport
+#define sdcardsupport
 // #define gfxsupport
 // #define lisplibrary
 #define assemblerlist
@@ -3629,35 +3629,28 @@ object *fn_subseq (object *args, object *env) {
     result->cdr = head;
     return result;
   } else {
-    if (args != NULL)
-      end = checkinteger(SUBSEQ, car(args));
-    else
-      end = listlength(LENGTH, arg);
+    end = (args != NULL) ? checkinteger(SUBSEQ, car(args)) : listlength(LENGTH, arg);
     if (start > end) error2(SUBSEQ, PSTR("start > end"));
     object *list = arg;
     int n = start;
     while (list != NULL) {
       if (improperp(list)) error(SUBSEQ, notproper, list);
-      if (n == 0) break;
+      if (n-- == 0) break;
       list = cdr(list);
-      n--;
     }
     int cnt = end - start - 1; 	/* indexing starts at 0 */
-    if (cnt < 0) { return nil; }
-    --cnt;			/* end is not inclusive */
+    if (cnt-- < 0) return nil;
     object *head = cons(car(list), nil);
     object *tail = head;
     list = cdr(list);
     while (list != NULL) {
-      if (cnt < 0) break;
+      if (cnt-- < 0) break;
       object *obj = cons(car(list), nil);
       cdr(tail) = obj; tail = obj;
       list = cdr(list);
-      cnt--;
     }
     return head;
   }
-  
 }
 
 object *fn_readfromstring (object *args, object *env) {   
