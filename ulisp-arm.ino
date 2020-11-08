@@ -3629,15 +3629,17 @@ object *fn_subseq (object *args, object *env) {
     result->cdr = head;
     return result;
   } else {
-    end = (args != NULL) ? checkinteger(SUBSEQ, car(args)) : listlength(LENGTH, arg);
+    end = (args != NULL) ? checkinteger(SUBSEQ, car(args)) : listlength(SUBSEQ, arg);
     if (start > end) error2(SUBSEQ, PSTR("start > end"));
     object *list = arg;
     int n = start;
+
     while (list != NULL) {
       if (improperp(list)) error(SUBSEQ, notproper, list);
       if (n-- == 0) break;
       list = cdr(list);
     }
+
     int cnt = end - start - 1; 	/* indexing starts at 0 */
     if (cnt-- < 0) return nil;
     object *head = cons(car(list), nil);
@@ -3645,6 +3647,7 @@ object *fn_subseq (object *args, object *env) {
     list = cdr(list);
     while (list != NULL) {
       if (cnt-- < 0) break;
+      if (improperp(list)) error(SUBSEQ, notproper, list);
       object *obj = cons(car(list), nil);
       cdr(tail) = obj; tail = obj;
       list = cdr(list);
